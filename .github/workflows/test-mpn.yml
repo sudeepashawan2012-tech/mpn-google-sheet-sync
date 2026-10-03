@@ -10,7 +10,6 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-
     steps:
       - uses: actions/setup-python@v6
         with:
@@ -33,145 +32,72 @@ jobs:
           from urllib.parse import urlsplit
           from playwright.sync_api import sync_playwright
 
-          def run_test():
-              stage = "Open portal"
-              try:
-                  with sync_playwright() as p:
-                      browser = p.chromium.launch(headless=True)
-                      page = browser.new_page()
-                      page.set_default_timeout(30000)
+          stage = "Start browser"
+          try:
+              with sync_playwright() as p:
+                  browser = p.chromium.launch()
+                  page = browser.new_page()
+                  page.set_default_timeout(45000)
 
-                      page.goto(
-                          "https://mpn.malabargroup.com/Dashboard.aspx",
-                          wait_until="domcontentloaded"
+                  stage = "Login"
+                  page.goto(
+                      "https://mpn.malabargroup.com/Dashboard.aspx",
+                      wait_until="domcontentloaded"
+                  )
+                  page.get_by_role(
+                      "textbox", name="Username", exact=True
+                  ).fill(os.environ["MPN_USERNAME"])
+                  page.get_by_role(
+                      "textbox", name="Password", exact=True
+                  ).fill(os.environ["MPN_PASSWORD"])
+                  page.get_by_role(
+                      "button", name="login", exact=True
+                  ).click()
+                  page.wait_for_url("**/Dashboard.aspx")
+
+                  if page.get_by_role(
+                      "textbox", name="Password", exact=True
+                  ).is_visible():
+                      raise RuntimeError("Login form still visible")
+                  print("MPN login: SUCCESS")
+
+                  stage = "Open Order List"
+                  page.goto(
+                      "https://mpn.malabargroup.com/OrderList.aspx",
+                      wait_until="domcontentloaded"
+                  )
+                  if urlsplit(page.url).path.lower() != "/orderlist.aspx":
+                      raise RuntimeError("Order List not reached")
+                  print("Order List opened: SUCCESS")
+
+                  stage = "Wait for order-type options"
+                  page.wait_for_function(
+                      """() => {
+                          const e = document.getElementById('ddlOrderType');
+                          return e && e.options.length > 1;
+                      }""",
+                      timeout=45000
+                  )
+
+                  for title, selector in [
+                      ("ORDER TYPE OPTIONS", "#ddlOrderType"),
+                      ("PAGE LIMIT OPTIONS", "#asdaddlpagelimit"),
+                  ]:
+                      print(title + ":")
+                      options = page.locator(
+                          selector + " option"
+                      ).evaluate_all(
+                          """items => items.map(o => ({
+                              label: o.textContent.trim(),
+                              value: o.value
+                          }))"""
                       )
+                      print(json.dumps(options, indent=2))
 
-                      stage = "Enter login details"
-                      page.get_by_role(
-                          "textbox", name="Username", exact=True
-                      ).fill(os.environ["MPN_USERNAME"])
-                      page.get_by_role(
-                          "textbox", name="Password", exact=True
-                      ).fill(os.environ["MPN_PASSWORD"])
+                  browser.close()
 
-                      stage = "Submit login"
-                      page.get_by_role(
-                          "button", name="login", exact=True
-                      ).click()
-
-                      stage = "Verify dashboard"
-                      page.wait_for_url(
-                          "**/Dashboard.aspx",
-                          wait_until="domcontentloaded",
-                          timeout=45000
-                      )
-
-                      if page.get_by_role(
-                          "textbox", name="Password", exact=True
-                      ).is_visible():
-                          raise RuntimeError("Login form still visible")
-
-                      if urlsplit(page.url).hostname != "mpn.malabargroup.com":
-                          raise RuntimeError("Unexpected destination")
-
-                      print("MPN dashboard reached: SUCCESS")
-                      print("Login form no longer visible: SUCCESS")
-
-                      stage = "Open Order List"
-                      page.goto(
-                          "https://mpn.malabargroup.com/OrderList.aspx",
-                          wait_until="domcontentloaded"
-                      )
-
-                      if page.get_by_role(
-                          "textbox", name="Password", exact=True
-                      ).is_visible():
-                          raise RuntimeError("Redirected to login")
-
-                      if urlsplit(page.url).path.lower() != "/orderlist.aspx":
-                          raise RuntimeError("Order List not reached")
-
-                      page.locator("select, button, input").first.wait_for(
-                          state="attached"
-                      )
-                      print("Order List opened: SUCCESS")
-                      
-                                            stage = "Wait for order-type options"
-                      page.wait_for_function(
-                          """() => {
-                              const e = document.getElementById('ddlOrderType');
-                              return e && e.options.length > 1;
-                          }""",
-                          timeout=45000
-                      )
-                      print("ORDER TYPE OPTIONS:")
-                      print(json.dumps(
-                          page.locator("#ddlOrderType option").evaluate_all(
-                              """options => options.map(o => ({
-                                  label: o.textContent.trim(),
-                                  value: o.value
-                              }))"""
-                          ),
-                          indent=2
-                      ))
-
-                      print("PAGE LIMIT OPTIONS:")
-                      print(json.dumps(
-                          page.locator("#asdaddlpagelimit option").evaluate_all(
-                              """options => options.map(o => ({
-                                  label: o.textContent.trim(),
-                                  value: o.value
-                              }))"""
-                          ),
-                          indent=2
-                      ))
-                      stage = "Inspect controls"
-                      controls = page.locator(
-                          "select, button, input:not([type='hidden']), "
-                          "[role='combobox']"
-                      ).evaluate_all("""
-                          elements => elements.map(e => ({
-                              tag: e.tagName,
-                              id: e.id,
-                              type: e.getAttribute('type') || '',
-                              role: e.getAttribute('role') || ''
-                          }))
-                      """)
-
-                      print("CONTROL IDENTIFIERS:")
-                      print(json.dumps(controls, indent=2))
-
-                      print("REQUIRED ORDER TYPES IN SELECTS:")
-                      types = [
-                          "Customer Order - Personalized",
-                          "Stock Order",
-                          "Customer Order - Design"
-                      ]
-
-                      for select in page.locator("select").all():
-                          options = select.locator(
-                              "option"
-                          ).all_text_contents()
-                          matches = [
-                              t for t in types
-                              if any(
-                                  t.lower() in o.lower()
-                                  for o in options
-                              )
-                          ]
-                          if matches:
-                              print(
-                                  "Select ID:",
-                                  select.get_attribute("id")
-                              )
-                              print("Order types:", ", ".join(matches))
-
-                      browser.close()
-
-              except Exception as error:
-                  print("MPN test FAILED at stage:", stage)
-                  print("Error type:", type(error).__name__)
-                  sys.exit(1)
-
-          run_test()
+          except Exception as error:
+              print("FAILED at stage:", stage)
+              print("Error type:", type(error).__name__)
+              sys.exit(1)
           PY
