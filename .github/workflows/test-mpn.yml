@@ -95,7 +95,36 @@ jobs:
                           state="attached"
                       )
                       print("Order List opened: SUCCESS")
+                      
+                                            stage = "Wait for order-type options"
+                      page.wait_for_function(
+                          """() => {
+                              const e = document.getElementById('ddlOrderType');
+                              return e && e.options.length > 1;
+                          }""",
+                          timeout=45000
+                      )
+                      print("ORDER TYPE OPTIONS:")
+                      print(json.dumps(
+                          page.locator("#ddlOrderType option").evaluate_all(
+                              """options => options.map(o => ({
+                                  label: o.textContent.trim(),
+                                  value: o.value
+                              }))"""
+                          ),
+                          indent=2
+                      ))
 
+                      print("PAGE LIMIT OPTIONS:")
+                      print(json.dumps(
+                          page.locator("#asdaddlpagelimit option").evaluate_all(
+                              """options => options.map(o => ({
+                                  label: o.textContent.trim(),
+                                  value: o.value
+                              }))"""
+                          ),
+                          indent=2
+                      ))
                       stage = "Inspect controls"
                       controls = page.locator(
                           "select, button, input:not([type='hidden']), "
