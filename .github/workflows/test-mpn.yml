@@ -1,0 +1,84 @@
+name: Test MPN Login
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install browser
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Test portal login
+        env:
+          MPN_USERNAME: ${{ secrets.MPN_USERNAME }}
+          MPN_PASSWORD: ${{ secrets.MPN_PASSWORD }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          from urllib.parse import urlsplit
+          from playwright.sync_api import sync_playwright
+
+          stage = "Open portal"
+          try:
+              with sync_playwright() as p:
+                  browser = p.chromium.launch(headless=True)
+                  page = browser.new_page()
+                  page.set_default_timeout(30000)
+
+                  page.goto(
+                      "https://mpn.malabargroup.com/Dashboard.aspx",
+                      wait_until="domcontentloaded"
+                  )
+
+                  stage = "Enter login details"
+                  page.get_by_role(
+                      "textbox", name="Username", exact=True
+                  ).fill(os.environ["MPN_USERNAME"])
+                  page.get_by_role(
+                      "textbox", name="Password", exact=True
+                  ).fill(os.environ["MPN_PASSWORD"])
+
+                  stage = "Submit login"
+                  page.get_by_role(
+                      "button", name="login", exact=True
+                  ).click()
+
+                  stage = "Verify dashboard"
+                  page.wait_for_url(
+                      "**/Dashboard.aspx",
+                      wait_until="domcontentloaded",
+                      timeout=45000
+                  )
+
+                  password = page.get_by_role(
+                      "textbox", name="Password", exact=True
+                  )
+                  if password.is_visible():
+                      raise RuntimeError("Login form still visible")
+
+                  if urlsplit(page.url).hostname != "mpn.malabargroup.com":
+                      raise RuntimeError("Unexpected destination")
+
+                  print("MPN dashboard reached: SUCCESS")
+                  print("Login form no longer visible: SUCCESS")
+                  browser.close()
+
+          except Exception as error:
+              print("MPN test FAILED at stage:", stage)
+              print("Error type:", type(error).__name__)
+              sys.exit(1)
+          PY
