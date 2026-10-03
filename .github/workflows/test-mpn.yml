@@ -75,6 +75,50 @@ jobs:
 
                   print("MPN dashboard reached: SUCCESS")
                   print("Login form no longer visible: SUCCESS")
+                                    stage = "Open Order List"
+                  page.goto(
+                      "https://mpn.malabargroup.com/OrderList.aspx",
+                      wait_until="domcontentloaded"
+                  )
+                  page.locator("body").wait_for()
+
+                  if page.get_by_role(
+                      "textbox", name="Password", exact=True
+                  ).is_visible():
+                      raise RuntimeError("Order List redirected to login")
+
+                  print("Order List opened: SUCCESS")
+
+                  controls = page.locator(
+                      "select, button, input:not([type='hidden']), "
+                      "[role='combobox']"
+                  ).evaluate_all("""
+                      elements => elements.map(e => ({
+                          tag: e.tagName,
+                          id: e.id,
+                          type: e.getAttribute('type') || '',
+                          role: e.getAttribute('role') || ''
+                      }))
+                  """)
+                  import json
+                  print("CONTROL IDENTIFIERS:")
+                  print(json.dumps(controls, indent=2))
+
+                  print("REQUIRED ORDER TYPES IN SELECTS:")
+                  types = [
+                      "Customer Order - Personalized",
+                      "Stock Order",
+                      "Customer Order - Design"
+                  ]
+                  for select in page.locator("select").all():
+                      options = select.locator("option").all_text_contents()
+                      matches = [
+                          t for t in types
+                          if any(t.lower() in o.lower() for o in options)
+                      ]
+                      if matches:
+                          print("Select ID:", select.get_attribute("id"))
+                          print("Order types:", ", ".join(matches))
                   browser.close()
 
           except Exception as error:
