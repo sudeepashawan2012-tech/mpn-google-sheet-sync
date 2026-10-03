@@ -27,102 +27,122 @@ jobs:
           MPN_PASSWORD: ${{ secrets.MPN_PASSWORD }}
         run: |
           python - <<'PY'
+          import json
           import os
           import sys
           from urllib.parse import urlsplit
           from playwright.sync_api import sync_playwright
 
-          stage = "Open portal"
-          try:
-              with sync_playwright() as p:
-                  browser = p.chromium.launch(headless=True)
-                  page = browser.new_page()
-                  page.set_default_timeout(30000)
+          def run_test():
+              stage = "Open portal"
+              try:
+                  with sync_playwright() as p:
+                      browser = p.chromium.launch(headless=True)
+                      page = browser.new_page()
+                      page.set_default_timeout(30000)
 
-                  page.goto(
-                      "https://mpn.malabargroup.com/Dashboard.aspx",
-                      wait_until="domcontentloaded"
-                  )
+                      page.goto(
+                          "https://mpn.malabargroup.com/Dashboard.aspx",
+                          wait_until="domcontentloaded"
+                      )
 
-                  stage = "Enter login details"
-                  page.get_by_role(
-                      "textbox", name="Username", exact=True
-                  ).fill(os.environ["MPN_USERNAME"])
-                  page.get_by_role(
-                      "textbox", name="Password", exact=True
-                  ).fill(os.environ["MPN_PASSWORD"])
+                      stage = "Enter login details"
+                      page.get_by_role(
+                          "textbox", name="Username", exact=True
+                      ).fill(os.environ["MPN_USERNAME"])
+                      page.get_by_role(
+                          "textbox", name="Password", exact=True
+                      ).fill(os.environ["MPN_PASSWORD"])
 
-                  stage = "Submit login"
-                  page.get_by_role(
-                      "button", name="login", exact=True
-                  ).click()
+                      stage = "Submit login"
+                      page.get_by_role(
+                          "button", name="login", exact=True
+                      ).click()
 
-                  stage = "Verify dashboard"
-                  page.wait_for_url(
-                      "**/Dashboard.aspx",
-                      wait_until="domcontentloaded",
-                      timeout=45000
-                  )
+                      stage = "Verify dashboard"
+                      page.wait_for_url(
+                          "**/Dashboard.aspx",
+                          wait_until="domcontentloaded",
+                          timeout=45000
+                      )
 
-                  password = page.get_by_role(
-                      "textbox", name="Password", exact=True
-                  )
-                  if password.is_visible():
-                      raise RuntimeError("Login form still visible")
+                      if page.get_by_role(
+                          "textbox", name="Password", exact=True
+                      ).is_visible():
+                          raise RuntimeError("Login form still visible")
 
-                  if urlsplit(page.url).hostname != "mpn.malabargroup.com":
-                      raise RuntimeError("Unexpected destination")
+                      if urlsplit(page.url).hostname != "mpn.malabargroup.com":
+                          raise RuntimeError("Unexpected destination")
 
-                  print("MPN dashboard reached: SUCCESS")
-                  print("Login form no longer visible: SUCCESS")
-                                    stage = "Open Order List"
-                  page.goto(
-                      "https://mpn.malabargroup.com/OrderList.aspx",
-                      wait_until="domcontentloaded"
-                  )
-                  page.locator("body").wait_for()
+                      print("MPN dashboard reached: SUCCESS")
+                      print("Login form no longer visible: SUCCESS")
 
-                  if page.get_by_role(
-                      "textbox", name="Password", exact=True
-                  ).is_visible():
-                      raise RuntimeError("Order List redirected to login")
+                      stage = "Open Order List"
+                      page.goto(
+                          "https://mpn.malabargroup.com/OrderList.aspx",
+                          wait_until="domcontentloaded"
+                      )
 
-                  print("Order List opened: SUCCESS")
+                      if page.get_by_role(
+                          "textbox", name="Password", exact=True
+                      ).is_visible():
+                          raise RuntimeError("Redirected to login")
 
-                  controls = page.locator(
-                      "select, button, input:not([type='hidden']), "
-                      "[role='combobox']"
-                  ).evaluate_all("""
-                      elements => elements.map(e => ({
-                          tag: e.tagName,
-                          id: e.id,
-                          type: e.getAttribute('type') || '',
-                          role: e.getAttribute('role') || ''
-                      }))
-                  """)
-                  import json
-                  print("CONTROL IDENTIFIERS:")
-                  print(json.dumps(controls, indent=2))
+                      if urlsplit(page.url).path.lower() != "/orderlist.aspx":
+                          raise RuntimeError("Order List not reached")
 
-                  print("REQUIRED ORDER TYPES IN SELECTS:")
-                  types = [
-                      "Customer Order - Personalized",
-                      "Stock Order",
-                      "Customer Order - Design"
-                  ]
-                  for select in page.locator("select").all():
-                      options = select.locator("option").all_text_contents()
-                      matches = [
-                          t for t in types
-                          if any(t.lower() in o.lower() for o in options)
+                      page.locator("select, button, input").first.wait_for(
+                          state="attached"
+                      )
+                      print("Order List opened: SUCCESS")
+
+                      stage = "Inspect controls"
+                      controls = page.locator(
+                          "select, button, input:not([type='hidden']), "
+                          "[role='combobox']"
+                      ).evaluate_all("""
+                          elements => elements.map(e => ({
+                              tag: e.tagName,
+                              id: e.id,
+                              type: e.getAttribute('type') || '',
+                              role: e.getAttribute('role') || ''
+                          }))
+                      """)
+
+                      print("CONTROL IDENTIFIERS:")
+                      print(json.dumps(controls, indent=2))
+
+                      print("REQUIRED ORDER TYPES IN SELECTS:")
+                      types = [
+                          "Customer Order - Personalized",
+                          "Stock Order",
+                          "Customer Order - Design"
                       ]
-                      if matches:
-                          print("Select ID:", select.get_attribute("id"))
-                          print("Order types:", ", ".join(matches))
-                  browser.close()
 
-          except Exception as error:
-              print("MPN test FAILED at stage:", stage)
-              print("Error type:", type(error).__name__)
-              sys.exit(1)
+                      for select in page.locator("select").all():
+                          options = select.locator(
+                              "option"
+                          ).all_text_contents()
+                          matches = [
+                              t for t in types
+                              if any(
+                                  t.lower() in o.lower()
+                                  for o in options
+                              )
+                          ]
+                          if matches:
+                              print(
+                                  "Select ID:",
+                                  select.get_attribute("id")
+                              )
+                              print("Order types:", ", ".join(matches))
+
+                      browser.close()
+
+              except Exception as error:
+                  print("MPN test FAILED at stage:", stage)
+                  print("Error type:", type(error).__name__)
+                  sys.exit(1)
+
+          run_test()
           PY
