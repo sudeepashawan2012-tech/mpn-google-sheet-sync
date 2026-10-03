@@ -20,7 +20,7 @@ jobs:
           pip install playwright
           python -m playwright install --with-deps chromium
 
-      - name: Test portal login
+      - name: Inspect Order List
         env:
           MPN_USERNAME: ${{ secrets.MPN_USERNAME }}
           MPN_PASSWORD: ${{ secrets.MPN_PASSWORD }}
@@ -32,14 +32,12 @@ jobs:
           from urllib.parse import urlsplit
           from playwright.sync_api import sync_playwright
 
-          stage = "Start browser"
+          stage = "Login"
           try:
               with sync_playwright() as p:
                   browser = p.chromium.launch()
                   page = browser.new_page()
                   page.set_default_timeout(45000)
-
-                  stage = "Login"
                   page.goto(
                       "https://mpn.malabargroup.com/Dashboard.aspx",
                       wait_until="domcontentloaded"
@@ -54,12 +52,11 @@ jobs:
                       "button", name="login", exact=True
                   ).click()
                   page.wait_for_url("**/Dashboard.aspx")
-
                   if page.get_by_role(
                       "textbox", name="Password", exact=True
                   ).is_visible():
                       raise RuntimeError("Login form still visible")
-                  print("MPN login: SUCCESS")
+                  print("Login: SUCCESS")
 
                   stage = "Open Order List"
                   page.goto(
@@ -68,32 +65,84 @@ jobs:
                   )
                   if urlsplit(page.url).path.lower() != "/orderlist.aspx":
                       raise RuntimeError("Order List not reached")
-                  print("Order List opened: SUCCESS")
 
-                  stage = "Wait for order-type options"
                   page.wait_for_function(
                       """() => {
                           const e = document.getElementById('ddlOrderType');
                           return e && e.options.length > 1;
-                      }""",
-                      timeout=45000
+                      }"""
                   )
 
-                  for title, selector in [
-                      ("ORDER TYPE OPTIONS", "#ddlOrderType"),
-                      ("PAGE LIMIT OPTIONS", "#asdaddlpagelimit"),
-                  ]:
-                      print(title + ":")
-                      options = page.locator(
-                          selector + " option"
+                  stage = "Wait for larger page limits"
+                  try:
+                      page.wait_for_function(
+                          """() => {
+                              const e = document.getElementById(
+                                  'asdaddlpagelimit'
+                              );
+                              return e && [...e.options].some(
+                                  o => Number(o.value) > 100
+                              );
+                          }""",
+                          timeout=20000
+                      )
+                  except Exception:
+                      print("Larger limits not present before filtering.")
+
+                  print("PAGE LIMIT OPTIONS:")
+                  print(json.dumps(
+                      page.locator(
+                          "#asdaddlpagelimit option"
                       ).evaluate_all(
                           """items => items.map(o => ({
                               label: o.textContent.trim(),
                               value: o.value
                           }))"""
-                      )
-                      print(json.dumps(options, indent=2))
+                      ),
+                      indent=2
+                  ))
 
+                  stage = "Inspect relevant buttons"
+                  print("FILTER AND DOWNLOAD CONTROLS:")
+                  print(json.dumps(
+                      page.locator(
+                          "button, a, input[type='button'], "
+                          "input[type='submit']"
+                      ).evaluate_all(
+                          """items => items.map(e => ({
+                              tag: e.tagName,
+                              id: e.id,
+                              text: (
+                                  e.tagName === 'INPUT'
+                                  ? e.value : e.textContent
+                              ).trim().replace(/\\s+/g, ' '),
+                              title: e.getAttribute('title') || '',
+                              aria: e.getAttribute('aria-label') || '',
+                              visible: !!e.getClientRects().length
+                          })).filter(e =>
+                              /^(filter|download excel|next|previous|reset)$/i
+                                  .test(e.text)
+                              || /^(next|previous)$/i.test(e.title)
+                              || /^(next|previous)$/i.test(e.aria)
+                          )"""
+                      ),
+                      indent=2
+                  ))
+
+                  print("TABLE HEADER CHECKBOXES:")
+                  print(json.dumps(
+                      page.locator(
+                          "thead input[type='checkbox'], "
+                          "th input[type='checkbox']"
+                      ).evaluate_all(
+                          """items => items.map(e => ({
+                              id: e.id,
+                              name: e.name,
+                              class: e.className
+                          }))"""
+                      ),
+                      indent=2
+                  ))
                   browser.close()
 
           except Exception as error:
